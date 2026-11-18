@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Замер скорости HTTP-загрузки ресурса: 10 последовательных GET-запросов."""
+"""Measure HTTP download speed of a resource: 10 sequential GET requests."""
 from __future__ import annotations
 
 import argparse
@@ -14,8 +14,8 @@ from typing import Callable, Iterator
 from urllib.parse import urlparse
 
 ATTEMPTS = 10
-TIMEOUT_SECONDS = 10.0       # таймаут на подключение и на каждое чтение из сокета
-MAX_REQUEST_SECONDS = 120.0  # общий лимит на попытку: защита от сервера, отдающего байты по капле
+TIMEOUT_SECONDS = 10.0       # timeout for connecting and for each socket read
+MAX_REQUEST_SECONDS = 120.0  # total limit per attempt: guards against a server trickling bytes
 CHUNK_SIZE = 64 * 1024
 MIB = 1024 * 1024
 
@@ -40,37 +40,37 @@ class Summary:
     succeeded: int
     failed: int
     total_bytes: int
-    avg_seconds: float | None       # None, если успешных попыток нет
-    bytes_per_second: float | None  # None, если успешных попыток нет
+    avg_seconds: float | None       # None if there are no successful attempts
+    bytes_per_second: float | None  # None if there are no successful attempts
 
 
-# --- Измерение ---------------------------------------------------------------
+# --- Measurement -------------------------------------------------------------
 
 def download(
     url: str,
     timeout: float = TIMEOUT_SECONDS,
     max_seconds: float = MAX_REQUEST_SECONDS,
 ) -> tuple[int, int]:
-    """Скачивает тело ответа целиком и возвращает (HTTP-статус, фактически полученные байты).
+    """Download the whole response body and return (HTTP status, bytes actually received).
 
-    Тело читается чанками и сразу отбрасывается, в памяти не накапливается.
-    Ответы 4xx/5xx urllib превращает в HTTPError.
+    The body is read in chunks and discarded immediately; it is not kept in memory.
+    urllib turns 4xx/5xx responses into HTTPError.
     """
-    # Свой User-Agent: многие CDN отвечают 403 на стандартный "Python-urllib".
+    # Custom User-Agent: many CDNs respond 403 to the default "Python-urllib".
     headers = {"User-Agent": "http-speedtest/1.0", "Cache-Control": "no-cache"}
     request = urllib.request.Request(url, headers=headers)
     started = time.perf_counter()
     with urllib.request.urlopen(request, timeout=timeout) as response:
         received = 0
-        # read1 отдаёт то, что уже пришло, а не ждёт полный чанк — иначе лимит времени
-        # проверялся бы слишком редко на медленном соединении.
+        # read1 returns whatever has already arrived instead of waiting for a full chunk;
+        # otherwise the time limit would be checked too rarely on a slow connection.
         while chunk := response.read1(CHUNK_SIZE):
             received += len(chunk)
             if time.perf_counter() - started > max_seconds:
                 raise TimeoutError(f"загрузка не уложилась в {max_seconds:g} с")
 
-        # http.client молча принимает оборванное соединение при чтении по частям,
-        # поэтому сверяем фактически полученные байты с заявленными.
+        # http.client silently accepts a dropped connection when reading in parts,
+        # so compare the bytes actually received against the declared length.
         expected = response.headers.get("Content-Length", "")
         if expected.isdigit() and received != int(expected):
             raise http.client.HTTPException(f"получено {received} байт, а Content-Length = {expected}")
@@ -84,7 +84,7 @@ def describe_error(exc: Exception) -> str:
         if isinstance(exc.reason, socket.timeout):
             return "таймаут подключения"
         return f"сетевая ошибка: {exc.reason}"
-    if isinstance(exc, (socket.timeout, TimeoutError)):  # в 3.10+ это один и тот же класс
+    if isinstance(exc, (socket.timeout, TimeoutError)):  # in 3.10+ these are the same class
         return f"таймаут: {exc}"
     if isinstance(exc, http.client.HTTPException):
         return f"некорректный ответ сервера: {type(exc).__name__} {exc}"
@@ -106,12 +106,12 @@ def run_attempt(number: int, url: str, fetch: Fetch = download) -> Attempt:
 
 
 def run_attempts(url: str, count: int = ATTEMPTS, fetch: Fetch = download) -> Iterator[Attempt]:
-    """Строго последовательно: следующая попытка начинается после завершения предыдущей."""
+    """Strictly sequential: the next attempt starts only after the previous one finishes."""
     for number in range(1, count + 1):
         yield run_attempt(number, url, fetch)
 
 
-# --- Статистика --------------------------------------------------------------
+# --- Statistics --------------------------------------------------------------
 
 def summarize(attempts: list[Attempt]) -> Summary:
     successful = [a for a in attempts if a.ok]
@@ -136,7 +136,7 @@ def to_mbps(bytes_per_second: float) -> float:
     return bytes_per_second * 8 / 1_000_000
 
 
-# --- Вывод -------------------------------------------------------------------
+# --- Output ------------------------------------------------------------------
 
 def format_attempt(attempt: Attempt) -> str:
     prefix = f"#{attempt.number:02d}"

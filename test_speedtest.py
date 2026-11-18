@@ -13,7 +13,7 @@ from speedtest import MIB, Attempt, download, main, run_attempts, summarize
 
 
 class Handler(BaseHTTPRequestHandler):
-    """Тестовый сервер. Протокол HTTP/1.0: соединение закрывается после каждого ответа."""
+    """Test server. HTTP/1.0: the connection is closed after each response."""
 
     requests = Counter()
     active = 0
@@ -30,20 +30,20 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self.route(request_number)
         except (BrokenPipeError, ConnectionResetError):
-            pass  # клиент оборвал соединение (таймаут) — для тестов это нормально
+            pass  # client dropped the connection (timeout) — expected in tests
         finally:
             with cls.lock:
                 cls.active -= 1
 
     def route(self, request_number):
         kind, _, arg = self.path.strip("/").partition("/")
-        if kind == "bytes":  # /bytes/<n> — тело из n байт с Content-Length
+        if kind == "bytes":  # /bytes/<n> — body of n bytes with Content-Length
             self.send_body(int(arg))
-        elif kind == "bytes-no-length":  # /bytes-no-length/<n> — без Content-Length
+        elif kind == "bytes-no-length":  # /bytes-no-length/<n> — without Content-Length
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"x" * int(arg))
-        elif kind == "chunked":  # /chunked/<n> — Transfer-Encoding: chunked, куски по 1000 байт
+        elif kind == "chunked":  # /chunked/<n> — Transfer-Encoding: chunked, 1000-byte chunks
             self.protocol_version = "HTTP/1.1"
             self.send_response(200)
             self.send_header("Transfer-Encoding", "chunked")
@@ -57,19 +57,19 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"0\r\n\r\n")
         elif kind == "status":  # /status/<code>
             self.send_body(16, status=int(arg))
-        elif kind == "flaky":  # нечётные запросы — 500, чётные — 1000 байт
+        elif kind == "flaky":  # odd requests — 500, even requests — 1000 bytes
             self.send_body(1000, status=500 if request_number % 2 else 200)
-        elif kind == "slow":  # ответ позже, чем клиентский таймаут
+        elif kind == "slow":  # responds later than the client timeout
             time.sleep(1)
             self.send_body(10)
-        elif kind == "trickle":  # байты по капле: каждое чтение укладывается в таймаут, вся загрузка — нет
+        elif kind == "trickle":  # trickles bytes: each read fits the timeout, the whole download does not
             self.send_response(200)
             self.end_headers()
             for _ in range(100):
                 self.wfile.write(b"x")
                 self.wfile.flush()
                 time.sleep(0.02)
-        elif kind == "truncated":  # обещаем 1000 байт, отдаём 10
+        elif kind == "truncated":  # promise 1000 bytes, send 10
             self.send_response(200)
             self.send_header("Content-Length", "1000")
             self.end_headers()
@@ -114,7 +114,7 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(summary.failed, 0)
         self.assertEqual(summary.total_bytes, 4 * MIB)
         self.assertAlmostEqual(summary.avg_seconds, 1.0)
-        # 4 MiB за 2 с суммарно → 2 MiB/s; 4·1048576·8 / 2 / 1e6 Mbps
+        # 4 MiB in 2 s total → 2 MiB/s; 4·1048576·8 / 2 / 1e6 Mbps
         self.assertAlmostEqual(speedtest.to_mib_per_second(summary.bytes_per_second), 2.0)
         self.assertAlmostEqual(speedtest.to_mbps(summary.bytes_per_second), 16.777216)
 
@@ -139,7 +139,7 @@ class SummaryTest(unittest.TestCase):
 
 class DownloadTest(LocalServerTestCase):
     def test_counts_bytes_with_content_length(self):
-        size = 3 * speedtest.CHUNK_SIZE + 123  # несколько чанков и неполный последний
+        size = 3 * speedtest.CHUNK_SIZE + 123  # several chunks plus a partial last one
         self.assertEqual(download(f"{self.base_url}/bytes/{size}"), (200, size))
 
     def test_counts_bytes_without_content_length(self):
@@ -175,7 +175,7 @@ class DownloadTest(LocalServerTestCase):
         self.assertIn("некорректный ответ", attempt.error)
 
     def test_connection_refused(self):
-        with socket.socket() as sock:  # берём заведомо свободный порт
+        with socket.socket() as sock:  # grab a port that is guaranteed to be free
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
         attempt = speedtest.run_attempt(1, f"http://127.0.0.1:{port}/")
